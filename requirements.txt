@@ -1,0 +1,9 @@
+sqlalchemy
+clickhouse-driver
+pandas
+openpyxl
+clickhouse-connect
+dbt-clickhouse~=1.7.0
+psycopg2-binary
+Faker
+numpy

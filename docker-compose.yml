@@ -1,0 +1,132 @@
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    
+
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-server
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_PASSWORD=default
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__WEBSERVER__RBAC: 'True'
+      AIRFLOW__WEBSERVER__AUTH_BACKEND: 'airflow.www.fab_security.manager.AuthDb'
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__WEBSERVER__SECRET_KEY: "166a8156c4e5036bc3ac46d0cd413fe2acea42294052b425aa429fab9eac"
+    ports:
+      - "8080:8080"
+    user: "root"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./source_data:/opt/airflow/source_data
+    command: webserver
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__WEBSERVER__SECRET_KEY: "166a8156c4e5036bc3ac46d0cd413fe2acea42294052b425aa429fab9eac"
+    user: "root"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./scripts:/opt/airflow/scripts
+      - ./source_data:/opt/airflow/source_data
+    command: scheduler
+
+  
+  airflow-init:
+    build:
+      context: .
+      dockerfile: airflow.Dockerfile
+    container_name: airflow-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    user: "root"
+    command: >
+      bash -c "
+        airflow db init && 
+        airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com
+      "
+    
+
+  superset:
+    build:
+      context: .
+      dockerfile: superset.Dockerfile
+    container_name: superset
+    ports:
+      - "8088:8088"
+    environment:
+      - SUPERSET_LOAD_EXAMPLES=no
+    volumes:
+      - ./superset_config.py:/app/pythonpath/superset_config.py
+    command: >
+      /bin/bash -c "
+      superset db upgrade &&
+      superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@example.com --password admin &&
+      superset init &&
+      superset run -h 0.0.0.0 -p 8088
+      "
+    
+
+  dbt:
+    image: ghcr.io/kestra-io/dbt-clickhouse:latest
+    container_name: dbt
+    depends_on:
+      - clickhouse-server
+    volumes:
+      - ./dbt:/usr/app
+      - ./profiles.yml:/root/.dbt/profiles.yml
+    working_dir: /usr/app
+    command: ["tail", "-f", "/dev/null"]
+
+volumes:
+  postgres_data:
+  clickhouse_data:
