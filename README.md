@@ -1,2 +1,2 @@
 # airflow_pipeline
-This is a pipeline project made while taking a practice at NITEC.
+This is a pipeline project made while working at NITEC.
